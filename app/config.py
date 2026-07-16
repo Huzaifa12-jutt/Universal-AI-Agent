@@ -51,7 +51,7 @@ class Settings:
     # Groq hosts the chat model (OpenAI-compatible endpoint)
     # FastEmbed handles embeddings locally (lightweight, no extra API key)
     # ------------------------------------------------------------------
-    # ✅ CHANGED: Use FastEmbed-compatible model (BAAI/bge-small-en-v1.5)
+    # ✅ FIXED: FastEmbed-compatible model only
     RAG_EMBEDDING_MODEL: str = os.getenv("RAG_EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
     
     RAG_CHUNK_SIZE: int = int(os.getenv("RAG_CHUNK_SIZE", "1000"))
