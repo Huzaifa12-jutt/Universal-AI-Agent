@@ -1,0 +1,23 @@
+# Render Blueprint - one-click deploy the FastAPI backend.
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: ai-utility-agent-backend
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: WEATHER_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-flash-latest
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: ALLOWED_ORIGINS
+        value: "*"
+      - key: LOG_LEVEL
+        value: INFO

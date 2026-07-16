@@ -1,0 +1,13 @@
+# ============================================================
+# AI Utility Agent — Frontend requirements (Streamlit UI only)
+# Deploy target: Streamlit Community Cloud
+#
+# Deliberately lightweight: the frontend only talks to the backend
+# over HTTP (see BACKEND_URL). All the heavy RAG/LLM dependencies
+# (langchain, faiss, fastembed, etc.) live in the backend's
+# requirements.txt and run on Render instead - this is what keeps
+# Streamlit Cloud deployments fast and free of dependency conflicts.
+# ============================================================
+streamlit==1.41.1
+requests==2.32.3
+python-dotenv==1.0.1

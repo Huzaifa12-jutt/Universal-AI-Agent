@@ -1,0 +1,38 @@
+# ============================================================
+# AI Utility Agent — Backend requirements (FastAPI + Tools + RAG)
+# Deploy target: Render (Docker)
+# All versions below were verified together in a clean venv
+# (pip install + pip check) to avoid dependency conflicts.
+# ============================================================
+
+# --- Backend framework ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+python-dotenv==1.0.1
+python-multipart==0.0.20      # required for FastAPI file uploads (PDFs)
+
+# --- General-purpose LLM (AI Chat tool) ---
+google-genai==1.3.0
+
+# --- Tools: calculator has no deps, weather uses requests ---
+requests==2.32.3
+ddgs==9.14.4
+wikipedia==1.4.0
+
+# --- PDF RAG tool (reused loader/chunker/embedder/vector_store/retriever/chatbot) ---
+langchain==0.3.30
+langchain-core==0.3.86
+langchain-community==0.3.27
+langchain-openai==0.3.35        # talks to Groq via its OpenAI-compatible endpoint
+langchain-text-splitters==0.3.11
+faiss-cpu==1.14.3               # vector store
+fastembed==0.8.0                # local embeddings, no extra API key needed
+pypdf==6.14.2                   # PDF parsing (used by PyPDFLoader)
+
+# --- Frontend (only needed if running frontend + backend from the same env,
+#     e.g. via run.py; Streamlit Cloud uses frontend/requirements.txt instead) ---
+streamlit==1.41.1
+
+# --- Testing ---
+pytest==8.3.4
