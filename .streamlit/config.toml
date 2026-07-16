@@ -1,4 +1,4 @@
-[theme]
+﻿[theme]
 base = "dark"
 primaryColor = "#7C5CFC"
 backgroundColor = "#0E1117"
@@ -11,6 +11,3 @@ headless = true
 enableCORS = false
 enableXsrfProtection = true
 maxUploadSize = 200
-
-[runtime]
-pythonVersion = "3.11"
