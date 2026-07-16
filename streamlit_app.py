@@ -7,13 +7,17 @@ No separate FastAPI backend needed. Everything runs inside Streamlit:
 - Gemini AI Chat
 """
 
-import base64
+import sys
 import os
+
+# ✅ FIX: Add parent directory to path so 'app' can be found
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import base64
 import tempfile
 from datetime import datetime
 from typing import Generator
 
-import requests
 import streamlit as st
 
 # =========================================================================
@@ -205,9 +209,7 @@ def local_chat(message: str) -> dict:
     calc_keywords = ["+", "-", "*", "×", "÷", "/", "calculate", "what is", "="]
     if any(kw in msg_lower for kw in calc_keywords):
         try:
-            # Try to parse as calculator query
             import re
-            # Simple math expression extraction
             nums = re.findall(r"[-+]?\d*\.?\d+", message)
             ops = re.findall(r"[+\-*/×÷]", message)
             if nums and ops:
@@ -224,7 +226,6 @@ def local_chat(message: str) -> dict:
     # Check for weather
     if "weather" in msg_lower or "temperature" in msg_lower or "rain" in msg_lower:
         try:
-            # Extract city name
             import re
             city_match = re.search(r"weather in (\w+)", msg_lower)
             if city_match:
@@ -277,9 +278,7 @@ def local_chat_stream(message: str) -> Generator:
     if rag_manager.has_documents():
         pdf_keywords = ["pdf", "document", "upload", "file", "page", "chapter", "section", "summarize", "summary", "overview"]
         if any(kw in message.lower() for kw in pdf_keywords):
-            # Use RAG manager with streaming
             yield {"type": "meta", "tool": "pdf"}
-            # Get full answer first (RAG doesn't support streaming yet)
             result = rag_manager.ask(message)
             yield {"type": "chunk", "text": result.get("answer", "No response")}
             yield {"type": "sources", "sources": result.get("sources", [])}
@@ -288,12 +287,10 @@ def local_chat_stream(message: str) -> Generator:
     # Otherwise use the agent
     from app.agent import agent
     try:
-        # Check if agent supports streaming
         if hasattr(agent, 'stream'):
             for event in agent.stream(message):
                 yield event
         else:
-            # Fallback: non-streaming
             result = agent.run(message)
             yield {"type": "meta", "tool": result.get("tool", "llm")}
             response_text = result.get("response", result.get("answer", "No response"))
@@ -371,7 +368,6 @@ def copy_button(text: str, key: str):
     )
 
 def make_text_stream(events_iter, meta_box: dict):
-    """Adapts the event generator into a plain text generator for st.write_stream()"""
     for event in events_iter:
         etype = event.get("type")
         if etype == "meta":
@@ -404,7 +400,6 @@ with st.sidebar:
     st.markdown('<div class="app-title">🤖 Universal AI Agent</div>', unsafe_allow_html=True)
     st.markdown('<div class="app-subtitle">Chat · PDF RAG · Calculator · Weather · Wikipedia · Search</div>', unsafe_allow_html=True)
 
-    # Status: Always online (since we're using local functions)
     st.markdown('<span class="status-pill status-online">🟢 Ready (Local)</span>', unsafe_allow_html=True)
     st.write("")
 
