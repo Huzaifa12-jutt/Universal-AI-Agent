@@ -40,17 +40,20 @@ class Settings:
 
     # ------------------------------------------------------------------
     # PDF RAG (Retrieval-Augmented Generation) settings
-    # Groq hosts the chat model (OpenAI-compatible endpoint), FastEmbed
-    # handles embeddings locally (no extra API key needed for that part).
+    # Groq hosts the chat model (OpenAI-compatible endpoint)
+    # HuggingFace sentence-transformers handles embeddings locally
     # ------------------------------------------------------------------
     GROQ_MODEL: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
     GROQ_BASE_URL: str = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
-    RAG_EMBEDDING_MODEL: str = os.getenv("RAG_EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
+    
+    # ✅ CHANGED: Use HuggingFace sentence-transformers (compatible with Python 3.14)
+    RAG_EMBEDDING_MODEL: str = os.getenv("RAG_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+    
     RAG_CHUNK_SIZE: int = int(os.getenv("RAG_CHUNK_SIZE", "1000"))
     RAG_CHUNK_OVERLAP: int = int(os.getenv("RAG_CHUNK_OVERLAP", "150"))
     
-    # ✅ CHANGE: Increased from 4 to 10 for better context retrieval
-    RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "10"))  # More chunks for better answers
+    # ✅ CHANGED: Increased from 4 to 10 for better context retrieval
+    RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "10"))
     
     RAG_TEMPERATURE: float = float(os.getenv("RAG_TEMPERATURE", "0.2"))
     VECTOR_DB_PATH: str = os.getenv("VECTOR_DB_PATH", "./data/vector_store")
