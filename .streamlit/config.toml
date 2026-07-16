@@ -10,3 +10,7 @@ font = "sans serif"
 headless = true
 enableCORS = false
 enableXsrfProtection = true
+maxUploadSize = 200
+
+[runtime]
+pythonVersion = "3.11"

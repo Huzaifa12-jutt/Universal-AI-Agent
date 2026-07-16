@@ -26,7 +26,7 @@ langchain-community==0.3.27
 langchain-openai==0.3.35
 langchain-text-splitters==0.3.11
 faiss-cpu==1.14.3
-fastembed==0.7.2          # ✅ FIXED: Compatible with streamlit + Python 3.11
+fastembed==0.7.2
 pypdf==6.14.2
 
 # --- Frontend (Streamlit) ---
