@@ -1,25 +1,32 @@
 """
-AI Utility Agent — Streamlit Frontend
-======================================
-One chat interface for everything: general AI chat (Gemini), PDF chat (RAG),
-calculator, weather, Wikipedia and web search. The backend agent decides
-which tool to use automatically - this file is UI only.
+Universal AI Agent — Streamlit Frontend (Standalone)
+====================================================
+No separate FastAPI backend needed. Everything runs inside Streamlit:
+- PDF RAG (Groq + FAISS)
+- Calculator, Weather, Wikipedia, Web Search
+- Gemini AI Chat
 """
 
 import base64
-import json
 import os
+import tempfile
 from datetime import datetime
+from typing import Generator
 
 import requests
 import streamlit as st
 
 # =========================================================================
+# LOCAL BACKEND IMPORTS (Direct RAG access)
+# =========================================================================
+from app.rag.manager import rag_manager
+from app.tools.registry import TOOLS
+from app.config import settings
+
+# =========================================================================
 # CONFIG
 # =========================================================================
-BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 REQUEST_TIMEOUT = 30
-UPLOAD_TIMEOUT = 180
 STREAM_TIMEOUT = 120
 
 TOOL_META = {
@@ -40,7 +47,7 @@ SUGGESTED_PROMPTS = [
 ]
 
 st.set_page_config(
-    page_title="AI Utility Agent",
+    page_title="Universal AI Agent",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -53,18 +60,12 @@ _DEFAULTS = {
     "messages": [],
     "nav": "chat",
     "theme": "dark",
-    "backend_url_override": "",
     "pending_message": None,
     "pdf_files_cache": [],
 }
 for _k, _v in _DEFAULTS.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
-
-
-def backend_url() -> str:
-    return (st.session_state.backend_url_override or BACKEND_URL).rstrip("/")
-
 
 # =========================================================================
 # THEME (custom CSS re-skins the whole app regardless of Streamlit's own theme)
@@ -147,89 +148,159 @@ _LIGHT_CSS = """
 st.markdown(_SHARED_CSS, unsafe_allow_html=True)
 st.markdown(_DARK_CSS if st.session_state.theme == "dark" else _LIGHT_CSS, unsafe_allow_html=True)
 
-
 # =========================================================================
-# BACKEND HELPERS
+# LOCAL RAG HELPERS (No API calls!)
 # =========================================================================
-def _request(method: str, path: str, **kwargs) -> dict:
-    timeout = kwargs.pop("timeout", REQUEST_TIMEOUT)
-    try:
-        r = requests.request(method, f"{backend_url()}{path}", timeout=timeout, **kwargs)
-        try:
-            data = r.json()
-        except ValueError:
-            data = {}
-        if r.status_code >= 400:
-            return {"error": data.get("error", f"Request failed ({r.status_code}).")}
-        return data
-    except requests.exceptions.Timeout:
-        return {"error": "Request timed out. If this is a free-hosted backend, it may be waking up - try again in a few seconds."}
-    except requests.exceptions.ConnectionError:
-        return {"error": f"Could not reach the backend at {backend_url()}."}
-    except requests.exceptions.RequestException as e:  # noqa: BLE001
-        return {"error": f"Unexpected error: {e}"}
 
-
-def backend_healthy() -> bool:
-    try:
-        r = requests.get(f"{backend_url()}/health", timeout=4)
-        return r.status_code == 200
-    except requests.exceptions.RequestException:
-        return False
-
-
-def get_backend_info() -> dict:
-    return _request("GET", "/")
-
-
-def fetch_pdf_list() -> list:
-    result = _request("GET", "/pdf/list")
-    files = result.get("files", [])
+def get_pdf_list_local() -> list:
+    """Get list of uploaded PDFs directly from rag_manager"""
+    files = rag_manager.list_pdfs()
     st.session_state.pdf_files_cache = files
     return files
 
+def upload_pdfs_local(uploaded_files) -> dict:
+    """Upload PDFs directly to rag_manager"""
+    uploads = []
+    for f in uploaded_files:
+        uploads.append((f.name, f.getvalue()))
+    return rag_manager.add_pdfs(uploads)
 
-def upload_pdfs(uploaded_files) -> dict:
-    payload = [("files", (f.name, f.getvalue(), "application/pdf")) for f in uploaded_files]
-    return _request("POST", "/pdf/upload", files=payload, timeout=UPLOAD_TIMEOUT)
+def delete_pdf_local(filename: str) -> dict:
+    """Delete PDF directly from rag_manager"""
+    ok = rag_manager.remove_pdf(filename)
+    if ok:
+        return {"status": "deleted", "filename": filename}
+    return {"error": f"'{filename}' not found"}
 
+def rebuild_index_local() -> dict:
+    """Rebuild vector index directly"""
+    return rag_manager.rebuild()
 
-def delete_pdf(filename: str) -> dict:
-    return _request("POST", "/pdf/delete", json={"filename": filename})
+def clear_pdfs_local() -> dict:
+    """Clear all PDFs directly"""
+    rag_manager.clear_all()
+    return {"status": "cleared"}
 
-
-def rebuild_index() -> dict:
-    return _request("POST", "/pdf/rebuild", timeout=UPLOAD_TIMEOUT)
-
-
-def clear_pdfs() -> dict:
-    return _request("POST", "/pdf/clear")
-
-
-def stream_chat_events(message: str):
-    """Yields parsed NDJSON event dicts from /chat/stream."""
+def local_chat(message: str) -> dict:
+    """
+    Direct chat function - decides which tool to use and returns response.
+    Handles all tools: llm, pdf, calculator, weather, wikipedia, search.
+    """
+    msg_lower = message.lower()
+    
+    # Check for PDF-related queries first (if documents exist)
+    if rag_manager.has_documents():
+        # Check if it's a PDF-related query
+        pdf_keywords = ["pdf", "document", "upload", "file", "page", "chapter", "section"]
+        if any(kw in msg_lower for kw in pdf_keywords) or rag_manager.files:
+            # Let RAG manager handle it
+            result = rag_manager.ask(message)
+            return {
+                "tool": "pdf",
+                "response": result.get("answer", "No response"),
+                "sources": result.get("sources", [])
+            }
+    
+    # Check for calculator
+    calc_keywords = ["+", "-", "*", "×", "÷", "/", "calculate", "what is", "="]
+    if any(kw in msg_lower for kw in calc_keywords):
+        try:
+            # Try to parse as calculator query
+            import re
+            # Simple math expression extraction
+            nums = re.findall(r"[-+]?\d*\.?\d+", message)
+            ops = re.findall(r"[+\-*/×÷]", message)
+            if nums and ops:
+                num1 = float(nums[0])
+                num2 = float(nums[1]) if len(nums) > 1 else 0
+                op = ops[0] if ops else "+"
+                op_map = {"+": "add", "-": "subtract", "*": "multiply", "×": "multiply", "/": "divide", "÷": "divide"}
+                op = op_map.get(op, "add")
+                result = TOOLS["calculator"].run(num1=num1, num2=num2, operation=op)
+                return {"tool": "calculator", "response": result, "sources": []}
+        except Exception:
+            pass
+    
+    # Check for weather
+    if "weather" in msg_lower or "temperature" in msg_lower or "rain" in msg_lower:
+        try:
+            # Extract city name
+            import re
+            city_match = re.search(r"weather in (\w+)", msg_lower)
+            if city_match:
+                city = city_match.group(1)
+                result = TOOLS["weather"].run(city)
+                return {"tool": "weather", "response": result, "sources": []}
+        except Exception:
+            pass
+    
+    # Check for Wikipedia
+    if "wikipedia" in msg_lower or "who is" in msg_lower or "what is" in msg_lower:
+        try:
+            if "wikipedia" in msg_lower:
+                query = msg_lower.replace("wikipedia", "").strip()
+            elif "who is" in msg_lower:
+                query = msg_lower.split("who is")[-1].strip()
+            elif "what is" in msg_lower:
+                query = msg_lower.split("what is")[-1].strip()
+            else:
+                query = msg_lower
+            if query:
+                result = TOOLS["wikipedia"].run(query)
+                return {"tool": "wikipedia", "response": result, "sources": []}
+        except Exception:
+            pass
+    
+    # Check for search
+    if "search" in msg_lower or "find" in msg_lower or "google" in msg_lower:
+        try:
+            search_terms = msg_lower.replace("search", "").replace("find", "").replace("google", "").strip()
+            if search_terms:
+                result = TOOLS["search"].run(search_terms)
+                return {"tool": "search", "response": result, "sources": []}
+        except Exception:
+            pass
+    
+    # Default: Use Gemini LLM (via agent)
+    from app.agent import agent
     try:
-        with requests.post(
-            f"{backend_url()}/chat/stream",
-            json={"message": message},
-            stream=True,
-            timeout=STREAM_TIMEOUT,
-        ) as r:
-            r.raise_for_status()
-            for line in r.iter_lines(decode_unicode=True):
-                if not line:
-                    continue
-                try:
-                    yield json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-    except requests.exceptions.Timeout:
-        yield {"type": "error", "message": "Request timed out. The backend may be waking up - try again."}
-    except requests.exceptions.ConnectionError:
-        yield {"type": "error", "message": f"Could not reach the backend at {backend_url()}."}
-    except requests.exceptions.RequestException as e:  # noqa: BLE001
-        yield {"type": "error", "message": f"Unexpected error: {e}"}
+        result = agent.run(message)
+        return {"tool": result.get("tool", "llm"), "response": result.get("response", result.get("answer", "No response")), "sources": []}
+    except Exception as e:
+        return {"tool": "error", "response": f"Error: {str(e)}", "sources": []}
 
+def local_chat_stream(message: str) -> Generator:
+    """
+    Stream response for chat. Yields events similar to the API format.
+    """
+    # Try RAG first if documents exist and query seems PDF-related
+    if rag_manager.has_documents():
+        pdf_keywords = ["pdf", "document", "upload", "file", "page", "chapter", "section", "summarize", "summary", "overview"]
+        if any(kw in message.lower() for kw in pdf_keywords):
+            # Use RAG manager with streaming
+            yield {"type": "meta", "tool": "pdf"}
+            # Get full answer first (RAG doesn't support streaming yet)
+            result = rag_manager.ask(message)
+            yield {"type": "chunk", "text": result.get("answer", "No response")}
+            yield {"type": "sources", "sources": result.get("sources", [])}
+            return
+    
+    # Otherwise use the agent
+    from app.agent import agent
+    try:
+        # Check if agent supports streaming
+        if hasattr(agent, 'stream'):
+            for event in agent.stream(message):
+                yield event
+        else:
+            # Fallback: non-streaming
+            result = agent.run(message)
+            yield {"type": "meta", "tool": result.get("tool", "llm")}
+            response_text = result.get("response", result.get("answer", "No response"))
+            yield {"type": "chunk", "text": response_text}
+            yield {"type": "sources", "sources": []}
+    except Exception as e:
+        yield {"type": "error", "message": str(e)}
 
 # =========================================================================
 # RENDER HELPERS
@@ -273,7 +344,6 @@ def format_tool_response(tool: str, response) -> str:
 
     return str(response)
 
-
 def render_sources(sources: list):
     if not sources:
         return
@@ -283,11 +353,9 @@ def render_sources(sources: list):
     )
     st.markdown(chips, unsafe_allow_html=True)
 
-
 def tool_badge_html(tool: str) -> str:
     meta = TOOL_META.get(tool, TOOL_META["llm"])
     return f'<span class="tool-badge">{meta["emoji"]} {meta["label"]}</span>'
-
 
 def copy_button(text: str, key: str):
     b64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
@@ -302,10 +370,8 @@ def copy_button(text: str, key: str):
         unsafe_allow_html=True,
     )
 
-
 def make_text_stream(events_iter, meta_box: dict):
-    """Adapts the raw NDJSON event generator into a plain text generator for
-    st.write_stream(), stashing tool/sources/errors into meta_box as a side effect."""
+    """Adapts the event generator into a plain text generator for st.write_stream()"""
     for event in events_iter:
         etype = event.get("type")
         if etype == "meta":
@@ -321,7 +387,6 @@ def make_text_stream(events_iter, meta_box: dict):
             meta_box["tool"] = "error"
             yield f"⚠️ {event.get('message', 'Something went wrong.')}"
 
-
 def render_message(msg: dict, index: int):
     role = msg["role"]
     with st.chat_message("user" if role == "user" else "assistant"):
@@ -332,21 +397,15 @@ def render_message(msg: dict, index: int):
             render_sources(msg.get("sources", []))
             copy_button(msg["content"], key=f"copy_{index}")
 
-
 # =========================================================================
 # SIDEBAR
 # =========================================================================
 with st.sidebar:
-    st.markdown('<div class="app-title">🤖 AI Utility Agent</div>', unsafe_allow_html=True)
+    st.markdown('<div class="app-title">🤖 Universal AI Agent</div>', unsafe_allow_html=True)
     st.markdown('<div class="app-subtitle">Chat · PDF RAG · Calculator · Weather · Wikipedia · Search</div>', unsafe_allow_html=True)
 
-    online = backend_healthy()
-    status_html = (
-        '<span class="status-pill status-online">🟢 Backend online</span>'
-        if online else
-        '<span class="status-pill status-offline">🔴 Backend unreachable</span>'
-    )
-    st.markdown(status_html, unsafe_allow_html=True)
+    # Status: Always online (since we're using local functions)
+    st.markdown('<span class="status-pill status-online">🟢 Ready (Local)</span>', unsafe_allow_html=True)
     st.write("")
 
     nav_choice = st.radio(
@@ -380,7 +439,7 @@ with st.sidebar:
 
         st.divider()
 
-    pdf_files = st.session_state.pdf_files_cache or fetch_pdf_list()
+    pdf_files = st.session_state.pdf_files_cache or get_pdf_list_local()
     st.caption(f"📄 Documents ({len(pdf_files)})")
     if pdf_files:
         for f in pdf_files[:4]:
@@ -416,14 +475,13 @@ with st.sidebar:
             use_container_width=True,
         )
 
-
 # =========================================================================
 # VIEW: CHAT
 # =========================================================================
 def render_chat_view():
     if not st.session_state.messages:
         st.markdown(
-            """
+            f"""
             <div class="empty-state">
                 <div class="big">🤖</div>
                 <h3>Ask me anything</h3>
@@ -456,7 +514,7 @@ def render_chat_view():
             badge_slot = st.empty()
             meta_box: dict = {}
             with st.spinner("Working on it..."):
-                full_text = st.write_stream(make_text_stream(stream_chat_events(final_input), meta_box))
+                full_text = st.write_stream(make_text_stream(local_chat_stream(final_input), meta_box))
             tool = meta_box.get("tool", "llm")
             badge_slot.markdown(tool_badge_html(tool), unsafe_allow_html=True)
             render_sources(meta_box.get("sources", []))
@@ -471,7 +529,6 @@ def render_chat_view():
             }
         )
         st.rerun()
-
 
 # =========================================================================
 # VIEW: DOCUMENTS (PDF RAG management)
@@ -492,7 +549,7 @@ def render_documents_view():
         if st.button("⬆️ Process & Index", use_container_width=True, type="primary", disabled=not uploaded):
             with st.status("Processing PDFs...", expanded=True) as status:
                 st.write(f"📤 Uploading {len(uploaded)} file(s)...")
-                result = upload_pdfs(uploaded)
+                result = upload_pdfs_local(uploaded)
                 if "error" in result:
                     status.update(label="Upload failed", state="error")
                     st.error(result["error"])
@@ -505,13 +562,13 @@ def render_documents_view():
                         st.write(f"⏭️ Skipped (already uploaded): {', '.join(skipped)}")
                     status.update(label="Documents ready!", state="complete")
                     st.toast(f"{len(added)} PDF(s) indexed", icon="✅")
-            fetch_pdf_list()
+            get_pdf_list_local()
             st.rerun()
 
     with rebuild_col:
         if st.button("🔄 Rebuild Index", use_container_width=True, disabled=not st.session_state.pdf_files_cache):
             with st.spinner("Rebuilding vector index..."):
-                result = rebuild_index()
+                result = rebuild_index_local()
             if "error" in result:
                 st.error(result["error"])
                 st.toast("Rebuild failed", icon="❌")
@@ -521,14 +578,14 @@ def render_documents_view():
 
     with clear_col:
         if st.button("🧹 Clear All PDFs", use_container_width=True, disabled=not st.session_state.pdf_files_cache):
-            clear_pdfs()
+            clear_pdfs_local()
             st.session_state.pdf_files_cache = []
             st.toast("All PDFs removed", icon="🧹")
             st.rerun()
 
     st.divider()
 
-    pdf_files = fetch_pdf_list()
+    pdf_files = get_pdf_list_local()
     st.subheader(f"Current PDFs ({len(pdf_files)})")
 
     if not pdf_files:
@@ -549,13 +606,12 @@ def render_documents_view():
             )
         with c2:
             if st.button("🗑️", key=f"del_{f['name']}", use_container_width=True):
-                res = delete_pdf(f["name"])
+                res = delete_pdf_local(f["name"])
                 if "error" in res:
                     st.toast(res["error"], icon="❌")
                 else:
                     st.toast(f"Removed {f['name']}", icon="🗑️")
                 st.rerun()
-
 
 # =========================================================================
 # VIEW: SETTINGS
@@ -571,21 +627,17 @@ def render_settings_view():
 
     st.divider()
 
-    st.subheader("Backend connection")
-    st.text_input(
-        "Backend URL override (leave blank to use the default)",
-        key="backend_url_override",
-        placeholder=BACKEND_URL,
-    )
-    st.caption(f"Currently using: `{backend_url()}`")
-
-    if st.button("🔌 Test Connection"):
-        info = get_backend_info()
-        if "error" in info:
-            st.error(info["error"])
-        else:
-            st.success(f"Connected to **{info.get('app', 'AI Utility Agent')}** v{info.get('version', '?')}")
-            st.json(info)
+    st.subheader("System Status")
+    st.info("✅ Running in standalone mode (no external backend required)")
+    
+    st.subheader("PDF RAG Status")
+    files = rag_manager.list_pdfs()
+    if files:
+        st.success(f"✅ {len(files)} PDF(s) loaded")
+        for f in files:
+            st.write(f"• {f['name']} ({f['pages']} pages)")
+    else:
+        st.warning("No PDFs loaded. Upload some in the Documents tab.")
 
     st.divider()
 
@@ -615,17 +667,16 @@ def render_settings_view():
     with st.expander("ℹ️ About this app"):
         st.markdown(
             """
-            **AI Utility Agent** is a single Streamlit app that routes every message
+            **Universal AI Agent** is a single Streamlit app that routes every message
             to the right tool automatically:
 
             - 🤖 **AI Chat** - powered by Gemini
             - 📄 **PDF RAG** - LangChain + FastEmbed + FAISS + Groq, over PDFs you upload
             - 🧮 **Calculator**, 🌤️ **Weather**, 📖 **Wikipedia**, 🔎 **Web Search**
 
-            Backend: FastAPI (deployed on Render) · Frontend: Streamlit (Streamlit Community Cloud)
+            All tools run locally within the Streamlit app — no separate backend needed.
             """
         )
-
 
 # =========================================================================
 # ROUTER
