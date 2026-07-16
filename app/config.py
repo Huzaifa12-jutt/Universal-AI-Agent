@@ -49,9 +49,11 @@ class Settings:
     # ------------------------------------------------------------------
     # PDF RAG (Retrieval-Augmented Generation) settings
     # Groq hosts the chat model (OpenAI-compatible endpoint)
-    # HuggingFace sentence-transformers handles embeddings locally
+    # FastEmbed handles embeddings locally (lightweight, no extra API key)
     # ------------------------------------------------------------------
-    RAG_EMBEDDING_MODEL: str = os.getenv("RAG_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+    # ✅ CHANGED: Use FastEmbed-compatible model (BAAI/bge-small-en-v1.5)
+    RAG_EMBEDDING_MODEL: str = os.getenv("RAG_EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
+    
     RAG_CHUNK_SIZE: int = int(os.getenv("RAG_CHUNK_SIZE", "1000"))
     RAG_CHUNK_OVERLAP: int = int(os.getenv("RAG_CHUNK_OVERLAP", "150"))
     RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "10"))

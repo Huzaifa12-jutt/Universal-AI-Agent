@@ -1,37 +1,46 @@
 # ==========================
 # rag/embedder.py
 #
-# Uses HuggingFace sentence-transformers for embeddings.
-# Compatible with Python 3.14 (no fastembed conflicts)
+# Uses FastEmbed (ONNX runtime) for lightweight embeddings.
+# FastEmbed is compatible with Python 3.14 and streamlit.
 # ==========================
 
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.embeddings import FastEmbedEmbeddings
 
 from app.config import settings
 
 
 def get_embedding_model():
     """
-    Load HuggingFace sentence-transformers embedding model.
+    Load FastEmbed embeddings model.
     
-    Models that work well:
-    - sentence-transformers/all-MiniLM-L6-v2 (~80MB, fast, good quality)
-    - sentence-transformers/all-mpnet-base-v2 (~420MB, better quality)
-    - BAAI/bge-small-en-v1.5 (~33MB, light weight)
-    - BAAI/bge-base-en-v1.5 (~438MB, good quality)
+    FastEmbed supports these models:
+    - BAAI/bge-small-en-v1.5 (~33MB, recommended, fast)
+    - BAAI/bge-base-en-v1.5 (~438MB, better quality)
+    - BAAI/bge-large-en-v1.5 (~1.3GB, best quality)
+    
+    FastEmbed does NOT support sentence-transformers models.
     """
     
     model_name = settings.RAG_EMBEDDING_MODEL
     
-    # If config still has fastembed model, use default
-    if model_name in ["BAAI/bge-small-en-v1.5", "BAAI/bge-base-en-v1.5", "BAAI/bge-large-en-v1.5"]:
-        model_name = "sentence-transformers/all-MiniLM-L6-v2"
+    # Ensure we're using a FastEmbed-compatible model
+    fastembed_models = [
+        "BAAI/bge-small-en-v1.5",
+        "BAAI/bge-base-en-v1.5", 
+        "BAAI/bge-large-en-v1.5"
+    ]
     
-    embeddings = HuggingFaceEmbeddings(
-        model_name=model_name,
-        model_kwargs={'device': 'cpu'},
-        encode_kwargs={'normalize_embeddings': True}
-    )
+    if model_name not in fastembed_models:
+        print(f"⚠️ Model '{model_name}' not compatible with FastEmbed. Using default.")
+        model_name = "BAAI/bge-small-en-v1.5"
     
-    print(f"✅ HuggingFace Embeddings Loaded ({model_name})")
-    return embeddings
+    try:
+        embeddings = FastEmbedEmbeddings(
+            model_name=model_name
+        )
+        print(f"✅ FastEmbed Model Loaded ({model_name})")
+        return embeddings
+    except Exception as e:
+        print(f"❌ FastEmbed failed to load: {e}")
+        raise
