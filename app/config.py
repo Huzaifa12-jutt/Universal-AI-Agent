@@ -33,28 +33,28 @@ class Settings:
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
 
     # ------------------------------------------------------------------
-    # Gemini / LLM settings
+    # LLM Settings (Choose which provider to use)
     # ------------------------------------------------------------------
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+    # Which model to use: "gemini" or "groq"
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "groq").lower()
+    
+    # --- Gemini Settings ---
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
     GEMINI_TIMEOUT: int = int(os.getenv("GEMINI_TIMEOUT", "30"))
+    
+    # --- Groq Settings ---
+    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    GROQ_BASE_URL: str = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 
     # ------------------------------------------------------------------
     # PDF RAG (Retrieval-Augmented Generation) settings
     # Groq hosts the chat model (OpenAI-compatible endpoint)
     # HuggingFace sentence-transformers handles embeddings locally
     # ------------------------------------------------------------------
-    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
-    GROQ_BASE_URL: str = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
-    
-    # ✅ CHANGED: Use HuggingFace sentence-transformers (compatible with Python 3.14)
     RAG_EMBEDDING_MODEL: str = os.getenv("RAG_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-    
     RAG_CHUNK_SIZE: int = int(os.getenv("RAG_CHUNK_SIZE", "1000"))
     RAG_CHUNK_OVERLAP: int = int(os.getenv("RAG_CHUNK_OVERLAP", "150"))
-    
-    # ✅ CHANGED: Increased from 4 to 10 for better context retrieval
     RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "10"))
-    
     RAG_TEMPERATURE: float = float(os.getenv("RAG_TEMPERATURE", "0.2"))
     VECTOR_DB_PATH: str = os.getenv("VECTOR_DB_PATH", "./data/vector_store")
     MAX_PDF_SIZE_MB: int = int(os.getenv("MAX_PDF_SIZE_MB", "20"))
@@ -100,3 +100,23 @@ def configure_logging() -> None:
         format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+
+
+# ------------------------------------------------------------------
+# Helper function to get LLM based on provider
+# ------------------------------------------------------------------
+def get_llm_config():
+    """Returns the appropriate LLM configuration based on provider."""
+    if settings.LLM_PROVIDER == "groq":
+        return {
+            "provider": "groq",
+            "api_key": settings.GROQ_API_KEY,
+            "model": settings.GROQ_MODEL,
+            "base_url": settings.GROQ_BASE_URL,
+        }
+    else:
+        return {
+            "provider": "gemini",
+            "api_key": settings.GEMINI_API_KEY,
+            "model": settings.GEMINI_MODEL,
+        }
